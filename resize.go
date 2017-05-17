@@ -72,7 +72,7 @@ func Resize(buf []byte, o Options) ([]byte, error) {
 	}
 
 	// Try to use libjpeg shrink-on-load
-	if imageType == JPEG && shrink >= 2 {
+	if imageType == JPEG && shrink >= 4 {
 		tmpImage, factor, err := shrinkJpegImage(buf, image, factor, shrink)
 		if err != nil {
 			return nil, err
@@ -165,9 +165,9 @@ func shouldApplyEffects(o Options) bool {
 func transformImage(image *C.VipsImage, o Options, shrink int, residual float64) (*C.VipsImage, error) {
 	var err error
 
-	// Use vips_shrink with the integral reduction
-	if shrink > 1 {
-		image, residual, err = shrinkImage(image, o, residual, shrink)
+	// Use vips_shrink with the integral reduction down to shrink >= 2
+	if shrink >= 4 {
+		image, residual, err = shrinkImage(image, o, residual, shrink / 2)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +180,7 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 	}
 
 	if o.Force || residual != 0 {
-		image, err = vipsAffine(image, residualx, residualy, o.Interpolator)
+		image, err = vipsReduce(image, 1.0 / residualx, 1.0 / residualy)
 		if err != nil {
 			return nil, err
 		}
@@ -196,8 +196,7 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 		return nil, err
 	}
 
-	debug("Transform: shrink=%v, residual=%v, interpolator=%v",
-		shrink, residual, o.Interpolator.String())
+	debug("Transform: shrink=%v, residual=%v", shrink, residual)
 
 	return image, nil
 }
@@ -368,13 +367,13 @@ func shrinkJpegImage(buf []byte, input *C.VipsImage, factor float64, shrink int)
 
 	// Recalculate integral shrink and double residual
 	switch {
-	case shrink >= 8:
+	case shrink >= 16:
 		factor = factor / 8
 		shrinkOnLoad = 8
-	case shrink >= 4:
+	case shrink >= 8:
 		factor = factor / 4
 		shrinkOnLoad = 4
-	case shrink >= 2:
+	case shrink >= 4:
 		factor = factor / 2
 		shrinkOnLoad = 2
 	}
