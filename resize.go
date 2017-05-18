@@ -165,6 +165,8 @@ func shouldApplyEffects(o Options) bool {
 func transformImage(image *C.VipsImage, o Options, shrink int, residual float64) (*C.VipsImage, error) {
 	var err error
 
+	debug("Transform: shrink=%v, residual=%v", shrink, residual)
+
 	// Use vips_shrink with the integral reduction down to shrink >= 2
 	if shrink >= 4 {
 		image, residual, err = shrinkImage(image, o, residual, shrink / 2)
@@ -180,7 +182,18 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 	}
 
 	if o.Force || residual != 0 {
-		image, err = vipsReduce(image, 1.0 / residualx, 1.0 / residualy)
+		xshrink := 1.0 / residualx
+		yshrink := 1.0 / residualy
+		if 1 < xshrink && xshrink <= 8 && 1 < yshrink && yshrink <= 8 {
+			debug("vipsReduce: xshrink=%v, yshrink=%v",
+					xshrink, yshrink)
+			image, err = vipsReduce(image, xshrink, yshrink)
+		} else {
+			debug("vipsAffine: residualx=%v, residualy=%v, interpolator=%v",
+					residualx, residualy, o.Interpolator)
+			image, err = vipsAffine(image, residualx, residualy, o.Interpolator)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -195,8 +208,6 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 	if err != nil {
 		return nil, err
 	}
-
-	debug("Transform: shrink=%v, residual=%v", shrink, residual)
 
 	return image, nil
 }
@@ -394,11 +405,9 @@ func imageCalculations(o *Options, inWidth, inHeight int) float64 {
 	switch {
 	// Fixed width and height
 	case o.Width > 0 && o.Height > 0:
-		if o.Crop {
-			factor = math.Min(xfactor, yfactor)
-		} else {
-			factor = math.Max(xfactor, yfactor)
-		}
+		// Take min factor to make sure all shrink factors
+		// are > 1 when aspect ratios are not preserved
+		factor = math.Min(xfactor, yfactor)
 	// Fixed width, auto height
 	case o.Width > 0:
 		factor = xfactor
