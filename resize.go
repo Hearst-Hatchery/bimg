@@ -167,7 +167,7 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 
 	debug("Transform: shrink=%v, residual=%v", shrink, residual)
 
-	// Use vips_shrink with the integral reduction down to shrink >= 2
+	// Use vips_shrink with the integral reduction down to shrink >= 4
 	if shrink >= 4 {
 		image, residual, err = shrinkImage(image, o, residual, shrink / 2)
 		if err != nil {
