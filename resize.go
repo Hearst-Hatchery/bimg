@@ -72,7 +72,7 @@ func Resize(buf []byte, o Options) ([]byte, error) {
 	}
 
 	// Try to use libjpeg shrink-on-load
-	if imageType == JPEG && shrink >= 2 {
+	if imageType == JPEG && shrink >= 4 {
 		tmpImage, factor, err := shrinkJpegImage(buf, image, factor, shrink)
 		if err != nil {
 			return nil, err
@@ -165,9 +165,11 @@ func shouldApplyEffects(o Options) bool {
 func transformImage(image *C.VipsImage, o Options, shrink int, residual float64) (*C.VipsImage, error) {
 	var err error
 
-	// Use vips_shrink with the integral reduction
-	if shrink > 1 {
-		image, residual, err = shrinkImage(image, o, residual, shrink)
+	debug("Transform: shrink=%v, residual=%v", shrink, residual)
+
+	// Use vips_shrink with the integral reduction down to shrink >= 4
+	if shrink >= 4 {
+		image, residual, err = shrinkImage(image, o, residual, shrink / 2)
 		if err != nil {
 			return nil, err
 		}
@@ -180,7 +182,18 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 	}
 
 	if o.Force || residual != 0 {
-		image, err = vipsAffine(image, residualx, residualy, o.Interpolator)
+		xshrink := 1.0 / residualx
+		yshrink := 1.0 / residualy
+		if 1 < xshrink && xshrink <= 8 && 1 < yshrink && yshrink <= 8 {
+			debug("vipsReduce: xshrink=%v, yshrink=%v",
+					xshrink, yshrink)
+			image, err = vipsReduce(image, xshrink, yshrink)
+		} else {
+			debug("vipsAffine: residualx=%v, residualy=%v, interpolator=%v",
+					residualx, residualy, o.Interpolator)
+			image, err = vipsAffine(image, residualx, residualy, o.Interpolator)
+		}
+
 		if err != nil {
 			return nil, err
 		}
@@ -195,9 +208,6 @@ func transformImage(image *C.VipsImage, o Options, shrink int, residual float64)
 	if err != nil {
 		return nil, err
 	}
-
-	debug("Transform: shrink=%v, residual=%v, interpolator=%v",
-		shrink, residual, o.Interpolator.String())
 
 	return image, nil
 }
@@ -368,13 +378,13 @@ func shrinkJpegImage(buf []byte, input *C.VipsImage, factor float64, shrink int)
 
 	// Recalculate integral shrink and double residual
 	switch {
-	case shrink >= 8:
+	case shrink >= 16:
 		factor = factor / 8
 		shrinkOnLoad = 8
-	case shrink >= 4:
+	case shrink >= 8:
 		factor = factor / 4
 		shrinkOnLoad = 4
-	case shrink >= 2:
+	case shrink >= 4:
 		factor = factor / 2
 		shrinkOnLoad = 2
 	}
@@ -395,11 +405,9 @@ func imageCalculations(o *Options, inWidth, inHeight int) float64 {
 	switch {
 	// Fixed width and height
 	case o.Width > 0 && o.Height > 0:
-		if o.Crop {
-			factor = math.Min(xfactor, yfactor)
-		} else {
-			factor = math.Max(xfactor, yfactor)
-		}
+		// Take min factor to make sure all shrink factors
+		// are > 1 when aspect ratios are not preserved
+		factor = math.Min(xfactor, yfactor)
 	// Fixed width, auto height
 	case o.Width > 0:
 		factor = xfactor
